@@ -123,21 +123,31 @@ class _MainPageState extends State<MainPage> {
                         return;
                       }
 
+                      final (targetRoute, targetRouteName) = switch (index) {
+                        0 => (const HomeRoute(), HomeRoute.name),
+                        1 => (const BrowseRoute(), BrowseRoute.name),
+                        2 => (const PlaylistsRoute(), PlaylistsRoute.name),
+                        _ => (null, ""),
+                      };
+
+                      final router = tabsRouter.stackRouterOfIndex(index);
+
                       if (index == tabsRouter.activeIndex) {
-                        final routeName = switch (index) {
-                          0 => "HomeRoute",
-                          1 => "BrowseRoute",
-                          2 => "PlaylistsRoute",
-                          _ => "",
-                        };
-                        final router = tabsRouter.childControllers.firstWhere(
-                          (c) => c.stack.first.name == routeName,
-                        );
-                        while (router.canPop()) {
-                          await router.maybePop();
+                        if (router != null) {
+                          if (router.stack.isNotEmpty &&
+                              router.stack.first.name == targetRouteName) {
+                            if (router.canPop(ignoreParentRoutes: true)) {
+                              router.popUntilRoot();
+                            } else if (index == 0) {
+                              context.read<HomeViewModel>().refresh(false);
+                            }
+                          } else if (targetRoute != null) {
+                            router.replaceAll([targetRoute]);
+                          }
                         }
                         return;
                       }
+
                       switch (index) {
                         case 0:
                           context.read<HomeViewModel>().refresh(false);
@@ -145,6 +155,14 @@ class _MainPageState extends State<MainPage> {
                           context.read<PlaylistRepository>().refresh();
                       }
                       tabsRouter.setActiveIndex(index);
+
+                      final destRouter = tabsRouter.stackRouterOfIndex(index);
+                      if (destRouter != null &&
+                          destRouter.stack.isNotEmpty &&
+                          destRouter.stack.first.name != targetRouteName &&
+                          targetRoute != null) {
+                        destRouter.replaceAll([targetRoute]);
+                      }
                     }
 
                     return ChangeNotifierProvider.value(
