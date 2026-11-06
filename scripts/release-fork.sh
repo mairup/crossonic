@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
-# Crossonic fork release pipeline (g14, Hermes-operated, systemd timer every 30 min).
-# Job A (web sync): if origin/main HEAD moved since last deploy: gate (analyze+test),
-#   flutter build web --wasm, deploy to mai-ai ~/www/music-stack/crossonic (README
-#   provenance updated, zip + SHA256SUMS kept for provenance).
-# Job B (app release): if a new v<semver> tag is reachable from origin/main beyond the
-#   last published release: gate, build split-ABI APKs, rename to the updater asset
-#   names Crossonic-<version>-android-<arch>.apk (arm64v8/arm32v7/x64 — the in-app
-#   updater matches these names EXACTLY), verify fork signing, publish a Forgejo
-#   release with the 3 APKs + web zip.
-# Fails safe: the gate blocks every deploy/release; any failure notifies Mai via
-#   Talk DM (through nab9). Idempotent via state files under
-#   ~/.local/state/crossonic-release/ (last_main, last_tag), logged to release.log.
+# Crossonic fork release pipeline (g14, user systemd timer every 30 min).
+#
+# RULES (user-mandated, 2026-11-06):
+# - Development happens on the dev branch; agents test on the DEV web deployment
+#   https://crossonic.mairup.space (mai-ai crossonic-dev container, :4535).
+# - main = production. A merge to main must be production-ready (gate + review +
+#   verified on the dev deployment). Merging to main deploys the PROD web client
+#   (https://music.mairup.space, crossonic container :4534) and bumps the version
+#   tag: this script creates tag v<pubspec version> on the main merge and publishes
+#   a Forgejo release with fork-signed APKs so phones auto-update.
+#
+# Jobs:
+# - DEV WEB SYNC: origin/dev HEAD moved -> gate on dev, build web --wasm, deploy to
+#   mai-ai ~/www/music-stack/crossonic-dev (crossonic.mairup.space), cache-busted.
+# - PROD WEB SYNC: origin/main HEAD moved -> gate on main, deploy to ~/www/music-stack/
+#   crossonic (music.mairup.space), cache-busted, README provenance updated.
+# - APP RELEASE: tag v<pubspec version> missing on origin/main after a main merge ->
+#   create+push it, then publish the Forgejo release with the 3 APKs + web zip.
+#   Asset names Crossonic-<version>-android-<arch>.apk (arm64v8/arm32v7/x64) are
+#   matched EXACTLY by the in-app updater; every APK must verify CN=Crossonic Fork.
+# Fails safe: the gate blocks every deploy/release; failures notify Mai via Talk DM.
+# Idempotent via state files under ~/.local/state/crossonic-release/, log release.log.
 set -uo pipefail
 
 REPO=/home/mai/Documents/Projects/crossonic
@@ -19,6 +29,7 @@ STATE="$HOME/.local/state/crossonic-release"
 LOG="$STATE/release.log"
 MAI_AI=mai-ai
 DEPLOY=/home/mai/www/music-stack/crossonic
+DEV_DEPLOY=/home/mai/www/music-stack/crossonic-dev
 FORGEJO_ENV="$HOME/mind-core/.secrets/forgejo.env"
 
 mkdir -p "$STATE"
@@ -40,20 +51,19 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-git fetch origin --tags || { log "FATAL: fetch origin failed"; notify "⚠️ crossonic pipeline: git fetch failed"; exit 1; }
-git checkout -q main && git reset -q --hard origin/main || { log "FATAL: sync to origin/main failed"; exit 1; }
+git fetch origin --tags --quiet || { log "FATAL: fetch origin failed"; notify "⚠️ crossonic pipeline: git fetch failed"; exit 1; }
 MAIN_SHA=$(git rev-parse origin/main)
+DEV_SHA=$(git rev-parse origin/dev)
 LAST_MAIN=$(cat "$STATE/last_main" 2>/dev/null || echo "")
+LAST_DEV=$(cat "$STATE/last_dev" 2>/dev/null || echo "")
 LAST_TAG=$(cat "$STATE/last_tag" 2>/dev/null || echo "")
-VER=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: //')
-NEWEST_TAG=$(git tag -l 'v*' --merged origin/main | sort -V | tail -1)
 
-NEED_WEB=0; NEED_APP=0
+NEED_DEV=0; NEED_WEB=0; NEED_APP=0
+[ "$DEV_SHA" != "$LAST_DEV" ] && NEED_DEV=1
 [ "$MAIN_SHA" != "$LAST_MAIN" ] && NEED_WEB=1
-[ -n "$NEWEST_TAG" ] && [ "$NEWEST_TAG" != "$LAST_TAG" ] && NEED_APP=1
 
-if [ "$NEED_WEB" -eq 0 ] && [ "$NEED_APP" -eq 0 ]; then
-  log "nothing to do (main ${MAIN_SHA:0:7} deployed, $LAST_TAG published)"
+if [ "$NEED_DEV" -eq 0 ] && [ "$NEED_WEB" -eq 0 ] && [ "$LAST_TAG" != "" ]; then
+  log "nothing to do (dev ${DEV_SHA:0:7}, main ${MAIN_SHA:0:7}, $LAST_TAG published)"
   exit 0
 fi
 
@@ -87,25 +97,30 @@ build_web_zip() {
   (cd "$STATE" && sha256sum "Crossonic-$VER-web.zip" > "Crossonic-$VER-SHA256SUMS.txt")
 }
 
-deploy_web() {
+bust_bootstrap() { # $1 = remote dir, $2 = sha to bake in; quote-free sed (remote shell is fish)
+  ssh "$MAI_AI" "cd $1/web && sed -i -e 's|\?v=[a-zA-Z0-9]\{3,\}|?v=TMP|g' -e 's|main\.dart\.js\([^a-z]\)|main.dart.js?v=$2\1|g' -e 's|main\.dart\.mjs\([^a-z]\)|main.dart.mjs?v=$2\1|g' -e 's|main\.dart\.wasm\([^a-z]\)|main.dart.wasm?v=$2\1|g' -e 's|?v=TMP|?v=$2|g' flutter_bootstrap.js"
+}
+
+deploy_web_to() { # $1 = remote dir, $2 = sha, $3 = public check URL, $4 = state file, $5 = label
+  local rdir=$1 sha=$2 url=$3 statef=$4 label=$5
   build_web_zip || return 1
-  if [ "$DRY" -eq 1 ]; then log "DRY: web $VER built, not deployed"; return 0; fi
-  scp -q "$STATE/Crossonic-$VER-web.zip" "$STATE/Crossonic-$VER-SHA256SUMS.txt" "$MAI_AI:$DEPLOY/"
-  if ! ssh "$MAI_AI" "cd $DEPLOY && sha256sum -c 'Crossonic-$VER-SHA256SUMS.txt' && unzip -oq 'Crossonic-$VER-web.zip' -d web"; then
-    log "FATAL: deploy to mai-ai failed"; notify "⚠️ crossonic pipeline: web deploy to mai-ai failed"; return 1
+  if [ "$DRY" -eq 1 ]; then log "DRY: $label web $VER built, not deployed"; return 0; fi
+  scp -q "$STATE/Crossonic-$VER-web.zip" "$STATE/Crossonic-$VER-SHA256SUMS.txt" "$MAI_AI:$rdir/"
+  if ! ssh "$MAI_AI" "cd $rdir && sha256sum -c 'Crossonic-$VER-SHA256SUMS.txt' && unzip -oq 'Crossonic-$VER-web.zip' -d web"; then
+    log "FATAL: $label deploy to mai-ai failed"; notify "⚠️ crossonic pipeline: $label web deploy failed"; return 1
   fi
-  # Cache-bust the unhashed entry files: flutter_bootstrap.js loads
-  # main.dart.js/.mjs/.wasm by literal URL, and a browser whose disk cache
-  # still considers an OLD build of that URL fresh quietly runs the old
-  # bundle against the new deploy and hangs on the splash forever
-  # (2026-11-06 incident). A version query changes the cache key, so every
-  # deploy is fetched fresh; nginx serves these with Cache-Control: no-store.
-  if ! ssh "$MAI_AI" "cd $DEPLOY/web && sed -i 's|\"main\\.dart\\.js\"|\"main.dart.js?v=$MAIN_SHA\"|g; s|\"main\\.dart\\.mjs\"|\"main.dart.mjs?v=$MAIN_SHA\"|g; s|\"main\\.dart\\.wasm\"|\"main.dart.wasm?v=$MAIN_SHA\"|g; s|m(\"main.dart.js?v=b51e0390\")|m(\"main.dart.js?v=$MAIN_SHA\")|g; s|main.dart.mjs?v=b51e0390\"|main.dart.mjs?v=$MAIN_SHA\"|g' flutter_bootstrap.js"; then
-    log "WARN: cache-bust patch failed"; notify "⚠️ crossonic pipeline: cache-bust patch failed on mai-ai"
+  if ! bust_bootstrap "$rdir" "$sha"; then
+    log "WARN: $label cache-bust patch failed"; notify "⚠️ crossonic pipeline: $label cache-bust failed"
   else
-    log "cache-busted entry files with v=$MAIN_SHA"
+    log "$label cache-busted entry files with v=$sha"
   fi
-  # README provenance: replace the Deployed version bullet
+  curl -s -o /dev/null -w "$label web check: %{http_code}\n" "$url"
+  echo "$sha" > "$STATE/$statef"
+  log "$label web $VER deployed from $label ${sha:0:7}"
+}
+
+deploy_web() { # prod: music.mairup.space (crossonic container :4534)
+  deploy_web_to "$DEPLOY" "$MAIN_SHA" "https://music.mairup.space/" last_main prod || return 1
   scp -q "$MAI_AI:$DEPLOY/README.md" "$STATE/README.md"
   python3 - "$STATE/README.md" "$VER" "$MAIN_SHA" "$(cut -d' ' -f1 "$STATE/Crossonic-$VER-SHA256SUMS.txt")" <<'PY'
 import re, sys
@@ -120,9 +135,13 @@ if n == 0:
 open(path, "w").write(text)
 PY
   scp -q "$STATE/README.md" "$MAI_AI:$DEPLOY/README.md"
-  curl -s -o /dev/null -w 'web check: %{http_code}\n' https://crossonic.mairup.space/
-  echo "$MAIN_SHA" > "$STATE/last_main"
-  log "web $VER deployed from main ${MAIN_SHA:0:7}"
+}
+
+deploy_dev_web() { # dev: crossonic.mairup.space (crossonic-dev container :4535)
+  git checkout -q dev && git reset -q --hard origin/dev || { log "FATAL: sync to origin/dev failed"; return 1; }
+  gate || return 1
+  VER=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: //')
+  deploy_web_to "$DEV_DEPLOY" "$DEV_SHA" "https://crossonic.mairup.space/" last_dev dev
 }
 
 publish_app() {
@@ -162,7 +181,28 @@ publish_app() {
   log "release $tag published (Forgejo id $id, $(git rev-parse --short "$tag"))"
 }
 
-gate || exit 1
-[ "$NEED_WEB" -eq 1 ] && { deploy_web || exit 1; }
+[ "$NEED_DEV" -eq 1 ] && { deploy_dev_web || exit 1; }
+
+git checkout -q main && git reset -q --hard origin/main || { log "FATAL: sync to origin/main failed"; exit 1; }
+VER=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: //')
+
+if [ "$NEED_WEB" -eq 1 ]; then
+  gate || exit 1
+  deploy_web || exit 1
+  # rule: a main merge bumps the version tag -> create v<pubspec version> on the
+  # merge commit if missing, then publish the app release for it
+  if ! git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then
+    if [ "$DRY" -eq 1 ]; then
+      log "DRY: would tag v$VER on ${MAIN_SHA:0:7}"
+    else
+      git tag -a "v$VER" -m "Crossonic fork release v$VER" "$MAIN_SHA" && git push -q origin "v$VER" \
+        || { log "FATAL: could not push tag v$VER"; notify "⚠️ crossonic pipeline: tag push failed"; exit 1; }
+      log "created tag v$VER on ${MAIN_SHA:0:7}"
+    fi
+  fi
+fi
+
+NEWEST_TAG=$(git tag -l 'v*' --merged origin/main | sort -V | tail -1)
+[ -n "$NEWEST_TAG" ] && [ "$NEWEST_TAG" != "$LAST_TAG" ] && NEED_APP=1
 [ "$NEED_APP" -eq 1 ] && { publish_app || exit 1; }
 log "run complete"
