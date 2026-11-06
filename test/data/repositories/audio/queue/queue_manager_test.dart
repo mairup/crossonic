@@ -44,6 +44,19 @@ Song makeSong(String id) => Song(
 void main() {
   late Database db;
   late QueueManager queue;
+  List<Song> songs = [];
+
+  Future<void> storeInDB(Song song) async {
+    await db.managers.songTable.create(
+      (o) => o(
+        id: song.id,
+        coverId: song.coverId,
+        title: song.title,
+        displayArtist: song.displayArtist,
+        updated: DateTime.now(),
+      ),
+    );
+  }
 
   setUp(() async {
     db = Database(NativeDatabase.memory());
@@ -58,6 +71,10 @@ void main() {
       keyValue: keyValueRepository,
     );
     await queue.init();
+    songs = [makeSong("s1"), makeSong("s2"), makeSong("s3")];
+    for (final song in songs) {
+      await storeInDB(song);
+    }
   });
 
   tearDown(() async {
@@ -65,30 +82,48 @@ void main() {
   });
 
   test("out of bounds insertAll into priority queue reports priority queue length", () async {
-    final songs = [makeSong("s1"), makeSong("s2"), makeSong("s3")];
-    for (final song in songs) {
-      await db.managers.songTable.create(
-        (o) => o(
-          id: song.id,
-          coverId: song.coverId,
-          title: song.title,
-          displayArtist: song.displayArtist,
-          updated: DateTime.now(),
-        ),
-      );
-    }
     await queue.addAll([songs[0], songs[1]], false);
     expect(queue.length, 2);
     expect(queue.priorityLength, 0);
 
     Object? error;
     try {
-      await queue.insertAll(1, [songs[2]], true);
+      await queue.insertAll(1, [songs[0]], true);
     } catch (e) {
       error = e;
     }
     expect(error, isA<IndexError>());
     // the error must describe the priority queue, not the regular queue
     expect((error as IndexError).length, 0);
+  });
+
+  // Simulates logout: AuthRepository.logout() clears the whole database
+  // (including the default queue) while the queue manager still holds its
+  // state in memory, then PlaybackManager stops the player which clears the
+  // queue.
+  test("clear after database wipe does not throw while a named queue is active", () async {
+    await queue.addAll([songs[0]], false);
+    await queue.createNewQueue("test");
+    expect(queue.currentQueueId, isNot(equals("crossonic_default")));
+
+    await db.clearAll();
+
+    await queue.clear();
+    expect(queue.currentQueueId, equals("crossonic_default"));
+    expect(queue.length, 0);
+    expect(queue.priorityLength, 0);
+  });
+
+  test("clear after database wipe does not throw with pending priority songs", () async {
+    await queue.addAll([songs[0]], false);
+    await queue.addAll([songs[1]], true);
+    expect(queue.priorityLength, 1);
+
+    await db.clearAll();
+
+    await queue.clear();
+    expect(queue.length, 0);
+    expect(queue.priorityLength, 0);
+    expect(queue.current.value, isNull);
   });
 }

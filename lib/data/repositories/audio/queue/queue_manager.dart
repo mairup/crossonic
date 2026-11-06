@@ -155,9 +155,23 @@ class QueueManager extends ChangeNotifier {
     bool notify = true,
     bool updateCurrent = true,
   }) async {
-    final queue = await _db.managers.queueTable
-        .filter((f) => f.id(queueId))
-        .getSingle();
+    var queue =
+        await _db.managers.queueTable
+            .filter((f) => f.id(queueId))
+            .getSingleOrNull();
+    if (queue == null && queueId == _defaultQueueId) {
+      // the database was cleared (logout) and the default queue with it
+      await _db.managers.queueTable.create(
+        (o) => o(id: _defaultQueueId, name: "Default"),
+        mode: InsertMode.insertOrIgnore,
+      );
+      queue = await _db.managers.queueTable
+          .filter((f) => f.id(queueId))
+          .getSingle();
+    }
+    if (queue == null) {
+      throw ArgumentError("Unknown queue: $queueId");
+    }
     final queueLength = await _db.managers.queueSongTable
         .filter((f) => f.queueId.id(queueId))
         .count();
