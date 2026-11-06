@@ -353,7 +353,7 @@ class QueueManager extends ChangeNotifier {
     if (index < 0 || index > _prioLength) {
       throw IndexError.withLength(
         index,
-        _regularLength,
+        _prioLength,
         message: "index out of bounds",
       );
     }
