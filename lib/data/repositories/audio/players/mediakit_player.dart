@@ -81,28 +81,42 @@ class AudioPlayerMediaKit extends AudioPlayer {
     _player!.stream.playing.listen((playing) => _onStateChange());
     _player!.stream.buffering.listen((buffering) => _onStateChange());
     int lastIndex = 0;
-    _player!.stream.playlist.listen((playlist) async {
-      if (_currentChanged || lastIndex == playlist.index) {
-        _currentChanged = false;
-        lastIndex = playlist.index;
-        return;
-      }
-      lastIndex = playlist.index;
-      _positionOffset = Duration.zero;
-      positionDiscontinuity.add(await position);
-      advance();
-    });
-    _player!.stream.completed.listen((completed) async {
-      if (!completed) return;
-      if (_player!.state.playing) return;
-      if (_player!.state.playlist.index + 1 ==
-          _player!.state.playlist.medias.length) {
-        // final advance to stop playback
+    if (kIsWeb) {
+      // On the web, media_kit's track transition marks the stream completed
+      // AND advances the playlist index in the same synchronous batch, so
+      // listening to both signals fires advance() twice per track end and
+      // the queue skips a song. Here completed is the exact once-per-track-
+      // end signal (it also fires for the final track, which stops playback).
+      _player!.stream.completed.listen((completed) async {
+        if (!completed) return;
         _positionOffset = Duration.zero;
         positionDiscontinuity.add(await position);
         advance();
-      }
-    });
+      });
+    } else {
+      _player!.stream.playlist.listen((playlist) async {
+        if (_currentChanged || lastIndex == playlist.index) {
+          _currentChanged = false;
+          lastIndex = playlist.index;
+          return;
+        }
+        lastIndex = playlist.index;
+        _positionOffset = Duration.zero;
+        positionDiscontinuity.add(await position);
+        advance();
+      });
+      _player!.stream.completed.listen((completed) async {
+        if (!completed) return;
+        if (_player!.state.playing) return;
+        if (_player!.state.playlist.index + 1 ==
+            _player!.state.playlist.medias.length) {
+          // final advance to stop playback
+          _positionOffset = Duration.zero;
+          positionDiscontinuity.add(await position);
+          advance();
+        }
+      });
+    }
     _player!.stream.error.listen((err) => _onError(err));
     await _applyVolume();
   }
