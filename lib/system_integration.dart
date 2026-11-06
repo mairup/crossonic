@@ -12,7 +12,7 @@ const systemIntegrationConfig = SystemIntegrationConfig(
   appName: "Crossonic",
   executableName: "crossonic",
   envPrefix: "CROSSONIC",
-  githubOwner: "juho05",
+  githubOwner: "mai",
   githubRepo: "crossonic",
   desktopId: "org.crossonic.app",
   desktopIconAsset: "assets/icon/desktop/crossonic-512.png",
