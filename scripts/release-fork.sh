@@ -92,6 +92,17 @@ deploy_web() {
   if ! ssh "$MAI_AI" "cd $DEPLOY && sha256sum -c 'Crossonic-$VER-SHA256SUMS.txt' && unzip -oq 'Crossonic-$VER-web.zip' -d web"; then
     log "FATAL: deploy to mai-ai failed"; notify "⚠️ crossonic pipeline: web deploy to mai-ai failed"; return 1
   fi
+  # Cache-bust the unhashed entry files: flutter_bootstrap.js loads
+  # main.dart.js/.mjs/.wasm by literal URL, and a browser whose disk cache
+  # still considers an OLD build of that URL fresh quietly runs the old
+  # bundle against the new deploy and hangs on the splash forever
+  # (2026-11-06 incident). A version query changes the cache key, so every
+  # deploy is fetched fresh; nginx serves these with Cache-Control: no-store.
+  if ! ssh "$MAI_AI" "cd $DEPLOY/web && sed -i 's|\"main\\.dart\\.js\"|\"main.dart.js?v=$MAIN_SHA\"|g; s|\"main\\.dart\\.mjs\"|\"main.dart.mjs?v=$MAIN_SHA\"|g; s|\"main\\.dart\\.wasm\"|\"main.dart.wasm?v=$MAIN_SHA\"|g; s|m(\"main.dart.js?v=b51e0390\")|m(\"main.dart.js?v=$MAIN_SHA\")|g; s|main.dart.mjs?v=b51e0390\"|main.dart.mjs?v=$MAIN_SHA\"|g' flutter_bootstrap.js"; then
+    log "WARN: cache-bust patch failed"; notify "⚠️ crossonic pipeline: cache-bust patch failed on mai-ai"
+  else
+    log "cache-busted entry files with v=$MAIN_SHA"
+  fi
   # README provenance: replace the Deployed version bullet
   scp -q "$MAI_AI:$DEPLOY/README.md" "$STATE/README.md"
   python3 - "$STATE/README.md" "$VER" "$MAIN_SHA" "$(cut -d' ' -f1 "$STATE/Crossonic-$VER-SHA256SUMS.txt")" <<'PY'
