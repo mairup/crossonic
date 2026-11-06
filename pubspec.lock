@@ -711,11 +711,9 @@ packages:
   flutter_system_integration:
     dependency: "direct main"
     description:
-      path: "."
-      ref: a45b0075e6f1f679bfecfc12eeaa9c32f6b3754f
-      resolved-ref: a45b0075e6f1f679bfecfc12eeaa9c32f6b3754f
-      url: "https://github.com/juho05/flutter_system_integration"
-    source: git
+      path: "dependency_overrides/flutter_system_integration"
+      relative: true
+    source: path
     version: "0.1.0"
   flutter_test:
     dependency: "direct dev"

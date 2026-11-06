@@ -1,0 +1,357 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:isolate';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_system_integration/src/appimage/appimage_repository.dart';
+import 'package:flutter_system_integration/src/auto_update/updaters/updater.dart';
+import 'package:flutter_system_integration/src/auto_update/updaters/updater_android.dart';
+import 'package:flutter_system_integration/src/auto_update/updaters/updater_linux_appimage.dart';
+import 'package:flutter_system_integration/src/auto_update/updaters/updater_macos.dart';
+import 'package:flutter_system_integration/src/auto_update/updaters/updater_windows.dart';
+import 'package:flutter_system_integration/src/config.dart';
+import 'package:flutter_system_integration/src/github/github_service.dart';
+import 'package:flutter_system_integration/src/github/http_client.dart';
+import 'package:flutter_system_integration/src/log.dart';
+import 'package:flutter_system_integration/src/upgrade_messages/upgrade_message.dart';
+import 'package:flutter_system_integration/src/upgrade_messages/upgrade_messages_repository.dart';
+import 'package:flutter_system_integration/src/version/version.dart';
+import 'package:flutter_system_integration/src/version/version_repository.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
+import 'package:rxdart/rxdart.dart';
+
+final _log = createLogger("AutoUpdateRepository");
+
+const _downloadStallTimeout = Duration(seconds: 30);
+
+enum AutoUpdateStatus {
+  initial,
+  checkingVersion,
+  downloading,
+  installing,
+  success,
+  failure,
+}
+
+/// An update resolved by [AutoUpdateRepository.prepareUpdate].
+class PendingUpdate {
+  final String tag;
+
+  /// Messages the user has to confirm before installing, oldest first.
+  final List<UpgradeMessage> messages;
+
+  const PendingUpdate({required this.tag, this.messages = const []});
+}
+
+class AutoUpdateRepository extends ChangeNotifier {
+  static bool autoUpdatesSupported(SystemIntegrationConfig config) =>
+      !config.versionCheckExternallyDisabled &&
+      (Platform.isAndroid ||
+          Platform.isWindows ||
+          Platform.isMacOS ||
+          AppImageRepository.isAppImage);
+
+  final SystemIntegrationConfig _config;
+  final VersionRepository _versionRepository;
+  final GitHubService _github;
+  final UpgradeMessagesRepository? _upgradeMessages;
+  final http.Client? _http;
+
+  late final Updater _updater;
+
+  AutoUpdateStatus _status = AutoUpdateStatus.initial;
+  AutoUpdateStatus get status => _status;
+
+  final BehaviorSubject<double> _downloadProgress = BehaviorSubject.seeded(0);
+  ValueStream<double> get downloadProgress => _downloadProgress.stream;
+
+  /// [beforeExit] is called on Windows and macOS right before the app exits
+  /// to let the installer run. Use it to release resources that must not be
+  /// alive when the process exits, e.g. a tray icon. It does not have to exit
+  /// the app itself, the app exits once it completes, throws or takes longer
+  /// than a few seconds.
+  ///
+  /// Without [upgradeMessagesRepository], no upgrade messages are shown
+  /// before installing.
+  AutoUpdateRepository({
+    required this._config,
+    required this._versionRepository,
+    required this._github,
+    UpgradeMessagesRepository? upgradeMessagesRepository,
+    http.Client? httpClient,
+    Future<void> Function()? beforeExit,
+    @visibleForTesting Updater? updater,
+  }) : _upgradeMessages = upgradeMessagesRepository,
+       _http = httpClient {
+    final appName = _config.appName;
+    if (updater != null) {
+      _updater = updater;
+    } else if (Platform.isAndroid) {
+      _log.fine("update platform: Android");
+      _updater = UpdaterAndroid(appName: appName);
+    } else if (Platform.isWindows) {
+      _log.fine("update platform: Windows");
+      _updater = UpdaterWindows(appName: appName, beforeExit: beforeExit);
+    } else if (Platform.isMacOS) {
+      _log.fine("update platform: macOS");
+      _updater = UpdaterMacOS(appName: appName, beforeExit: beforeExit);
+    } else if (AppImageRepository.isAppImage) {
+      _log.fine("update platform: Linux (AppImage)");
+      _updater = UpdaterLinuxAppImage(appName: appName);
+    } else {
+      throw UnsupportedError("auto updates are not supported on this platform");
+    }
+  }
+
+  /// Whether the user has to grant a permission before an update can be
+  /// installed. Currently only the case on Android.
+  Future<bool> needsInstallPermission() => _updater.needsInstallPermission();
+
+  /// Asks the user to grant the install permission, on Android by opening the
+  /// system settings. Returns whether it was granted.
+  Future<bool> requestInstallPermission() =>
+      _updater.requestInstallPermission();
+
+  /// Resolves the latest version and the upgrade messages to confirm before
+  /// installing it. Returns null if there is no newer version or the update
+  /// can't be started.
+  ///
+  /// Errors are logged and reflected in [status] instead of being thrown.
+  Future<PendingUpdate?> prepareUpdate() async {
+    if (!_canStart()) return null;
+
+    _log.info("Preparing auto update...");
+    _setStatus(AutoUpdateStatus.checkingVersion);
+    try {
+      final latestVersionTag = await _versionRepository.getLatestVersionTag(
+        force: true,
+      );
+      if (latestVersionTag == null ||
+          await VersionRepository.getCurrentVersion() >=
+              Version.parse(latestVersionTag)) {
+        _setStatus(AutoUpdateStatus.initial);
+        return null;
+      }
+      final messages =
+          await _upgradeMessages?.fetchMessagesForUpdate(latestVersionTag) ??
+          const [];
+      _setStatus(AutoUpdateStatus.initial);
+      return PendingUpdate(tag: latestVersionTag, messages: messages);
+    } on Object catch (e, st) {
+      _log.severe("Preparing auto update failed", e, st);
+      _setStatus(AutoUpdateStatus.failure);
+      return null;
+    }
+  }
+
+  Future<void> markUpgradeMessagesShown(PendingUpdate pending) async {
+    await _upgradeMessages?.markShown(pending.messages);
+  }
+
+  /// Downloads and installs the version of [pending].
+  ///
+  /// Errors are logged and reflected in [status] instead of being thrown.
+  /// On Windows and macOS the app exits to let the installer run.
+  Future<void> update(PendingUpdate pending) async {
+    if (!_canStart()) return;
+
+    _log.info("Performing auto update to ${pending.tag}...");
+    try {
+      final file = await _download(pending.tag);
+
+      _log.fine("Installing ${file.path}...");
+      _setStatus(AutoUpdateStatus.installing);
+      try {
+        await _updater.install(file);
+      } finally {
+        if (await file.exists()) {
+          _log.fine("Removing installer file ${file.path}...");
+          await file.delete();
+        }
+      }
+
+      _log.info("Auto update successful!");
+      _setStatus(AutoUpdateStatus.success);
+    } on UpdateCancelledException {
+      _log.info("Auto update cancelled by user");
+      _setStatus(AutoUpdateStatus.initial);
+    } on Object catch (e, st) {
+      // errors from the download isolate can arrive as a RemoteError
+      _log.severe("Auto update failed", e, st);
+      _setStatus(AutoUpdateStatus.failure);
+    }
+  }
+
+  bool _canStart() {
+    if (status != AutoUpdateStatus.initial &&
+        status != AutoUpdateStatus.failure) {
+      _log.warning("Cannot start auto update when it's already running.");
+      return false;
+    }
+    return true;
+  }
+
+  void _setStatus(AutoUpdateStatus status) {
+    _status = status;
+    notifyListeners();
+  }
+
+  Future<File> _download(String tag) async {
+    // set before the first await, so the update can't be started twice
+    _downloadProgress.add(0);
+    _setStatus(AutoUpdateStatus.downloading);
+
+    final fileNames = await _updater.generateDownloadFileNames(
+      Version.parse(tag),
+    );
+    assert(fileNames.isNotEmpty);
+
+    final targetDir = Directory(
+      path.join(
+        (await _downloadParentDirectory()).absolute.path,
+        "auto_update_downloads",
+      ),
+    );
+    if (await targetDir.exists()) {
+      await targetDir.delete(recursive: true);
+    }
+    await targetDir.create(recursive: true);
+
+    for (final fileName in fileNames.take(fileNames.length - 1)) {
+      try {
+        return await _downloadReleaseFile(tag, fileName, targetDir);
+      } on GitHubUnexpectedStatusCode catch (e) {
+        if (e.status != 404) rethrow;
+        _log.warning("$fileName not found in release, trying next file");
+      }
+    }
+    return await _downloadReleaseFile(tag, fileNames.last, targetDir);
+  }
+
+  Future<File> _downloadReleaseFile(
+    String tag,
+    String fileName,
+    Directory targetDir,
+  ) async {
+    final uri = _github.generateReleaseDownloadLink(
+      owner: _config.githubOwner,
+      repo: _config.githubRepo,
+      tag: tag,
+      fileName: fileName,
+    );
+    _log.fine("Downloading $uri...");
+
+    final outputFile = File(path.join(targetDir.path, fileName)).absolute;
+    final userAgent = await _github.userAgent;
+
+    if (_http != null) {
+      await _downloadFile(
+        _http,
+        uri,
+        userAgent,
+        outputFile.path,
+        _downloadProgress.add,
+      );
+      return outputFile;
+    }
+
+    // The event loop of the main isolate is tied to the platform thread which
+    // limits the throughput of the response stream.
+    final progress = ReceivePort();
+    progress.listen((p) => _downloadProgress.add(p as double));
+    try {
+      await Isolate.run(
+        _downloadTask(uri, userAgent, outputFile.path, progress.sendPort),
+      );
+    } finally {
+      progress.close();
+    }
+    return outputFile;
+  }
+
+  /// /tmp is shared between all users on Linux, a directory left behind there
+  /// by one user could not be replaced by another.
+  Future<Directory> _downloadParentDirectory() => Platform.isLinux
+      ? getApplicationCacheDirectory()
+      : getTemporaryDirectory();
+
+  @override
+  void dispose() {
+    _downloadProgress.close();
+    super.dispose();
+  }
+}
+
+Future<void> Function() _downloadTask(
+  Uri uri,
+  String userAgent,
+  String outputPath,
+  SendPort progress,
+) => () async {
+  final client = createHttpClient();
+  try {
+    await _downloadFile(client, uri, userAgent, outputPath, progress.send);
+  } finally {
+    client.close();
+  }
+};
+
+Future<void> _downloadFile(
+  http.Client client,
+  Uri uri,
+  String userAgent,
+  String outputPath,
+  void Function(double progress) onProgress,
+) async {
+  // The timer is restarted on every received chunk, so it only fires when no
+  // data arrives at all and never limits the total download duration.
+  final abort = Completer<void>();
+  Timer? stallTimer;
+  void restartStallTimer() {
+    stallTimer?.cancel();
+    stallTimer = Timer(_downloadStallTimeout, abort.complete);
+  }
+
+  final request = http.AbortableRequest("GET", uri, abortTrigger: abort.future)
+    ..headers["User-Agent"] = userAgent;
+  restartStallTimer();
+  try {
+    final response = await client.send(request);
+    if (response.statusCode != 200) {
+      await response.stream.drain<void>();
+      throw GitHubUnexpectedStatusCode(response.statusCode);
+    }
+
+    final totalBytes = response.contentLength;
+    final outputFile = File(outputPath);
+    final sink = outputFile.openWrite();
+    try {
+      int downloadedBytes = 0;
+      int lastPercent = 0;
+      await for (final chunk in response.stream) {
+        restartStallTimer();
+        sink.add(chunk);
+        downloadedBytes += chunk.length;
+        if (totalBytes != null && totalBytes > 0) {
+          final percent = downloadedBytes * 100 ~/ totalBytes;
+          if (percent != lastPercent) {
+            lastPercent = percent;
+            onProgress(downloadedBytes / totalBytes);
+          }
+        }
+      }
+      stallTimer?.cancel();
+      await sink.close();
+    } catch (_) {
+      await sink.close();
+      if (await outputFile.exists()) await outputFile.delete();
+      rethrow;
+    }
+  } on http.RequestAbortedException {
+    throw TimeoutException("Download stalled: $uri", _downloadStallTimeout);
+  } finally {
+    stallTimer?.cancel();
+  }
+}

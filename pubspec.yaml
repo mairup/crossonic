@@ -1,7 +1,7 @@
 name: crossonic
 description: "An OpenSubsonic compatible music player with its own server for additional features."
 publish_to: "none"
-version: 0.5.3+16
+version: 0.5.4+17
 environment:
   sdk: ^3.13.0
 
@@ -82,6 +82,10 @@ dependencies:
   image_picker_android: ^0.8.13+23
   image_picker_platform_interface: ^2.11.1
 dependency_overrides:
+  # fork: patched to point version checking and auto updates at the fork's
+  # Forgejo instance (git.mairup.space) instead of GitHub
+  flutter_system_integration:
+    path: ./dependency_overrides/flutter_system_integration
   auto_route:
     git:
       url: https://github.com/juho05/auto_route_library
