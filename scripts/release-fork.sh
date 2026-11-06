@@ -113,7 +113,9 @@ PY
 }
 
 publish_app() {
-  local tag=$NEWEST_TAG ver=${NEWEST_TAG#v} out="$STATE/$tag"
+  local tag=$NEWEST_TAG
+  local ver=${NEWEST_TAG#v}
+  local out="$STATE/$tag"
   $FLUTTER build apk --split-per-abi >/dev/null || { log "FATAL: apk build failed"; notify "⚠️ crossonic pipeline: apk build failed"; return 1; }
   mkdir -p "$out"
   cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$out/Crossonic-$ver-android-arm64v8.apk"
