@@ -275,11 +275,15 @@ class PlaybackManager {
 
   Future<void> _onAuthChanged() async {
     if (_auth.isAuthenticated) {
+      // configure the stream URL before restoring the queue: queue.init
+      // replays the persisted current song into the player, which would
+      // otherwise construct a stream URL from an unconfigured base and,
+      // on the web, throw MEDIA_ELEMENT_ERROR: Empty src attribute
+      await _configurePlayerServerURL();
       if (_wasAuthenticated == false) {
         await _queue.init();
       }
       _wasAuthenticated = true;
-      await _configurePlayerServerURL();
       return;
     }
     _wasAuthenticated = false;
