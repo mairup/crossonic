@@ -82,7 +82,9 @@ gate() {
 build_web_zip() {
   $FLUTTER build web --wasm >/dev/null || { log "FATAL: web build failed"; notify "⚠️ crossonic pipeline: web build failed"; return 1; }
   ( cd build/web && python3 -m zipfile -c "$STATE/Crossonic-$VER-web.zip" . )
-  sha256sum "$STATE/Crossonic-$VER-web.zip" > "$STATE/Crossonic-$VER-SHA256SUMS.txt"
+  # checksum lines must carry the bare filename: the file is verified with
+  # sha256sum -c on mai-ai, where the local absolute path does not exist
+  (cd "$STATE" && sha256sum "Crossonic-$VER-web.zip" > "Crossonic-$VER-SHA256SUMS.txt")
 }
 
 deploy_web() {
