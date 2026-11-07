@@ -27,9 +27,16 @@ class HomeLayoutSettings extends ChangeNotifier {
   final KeyValueRepository _repo;
 
   static const String _selectedOptionsKey = "home_page_layout.selected_options";
+  // fork default: a fuller home page than upstream; users can still
+  // reorder/remove entries and reset() restores this list
   static const Iterable<HomeContentOption> _selectedOptionsDefault = [
     HomeContentOption.recentlyAddedReleases,
+    HomeContentOption.recentlyPlayedReleases,
+    HomeContentOption.frequentlyPlayedReleases,
+    HomeContentOption.favoriteSongs,
     HomeContentOption.randomSongs,
+    HomeContentOption.favoriteReleases,
+    HomeContentOption.randomReleases,
   ];
   List<HomeContentOption> _selectedOptions = _selectedOptionsDefault.toList();
   Iterable<HomeContentOption> get selectedOptions => _selectedOptions;
