@@ -26,6 +26,7 @@ class InstallUpdatePage extends StatelessWidget {
           ? context.read()
           : null,
       exitApp: exitApp,
+      autoStart: true,
     );
   }
 }

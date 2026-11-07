@@ -86,7 +86,7 @@ void main() {
 
     expect(await repo.getLatestVersionTag(), "v1.0.0");
     expect(await repo.getLatestVersion(), const Version(major: 1));
-    expect(requests.first.url.path, "/repos/owner/repo/tags");
+    expect(requests.first.url.path, "/api/v1/repos/owner/repo/tags");
     expect(requests.first.url.queryParameters, {"per_page": "30"});
     expect(requests.first.headers["User-Agent"], "Test v1.0.0");
   });
@@ -144,7 +144,7 @@ void main() {
             fileName: "Test-1.0.0-linux-x86-64.AppImage",
           )
           .toString(),
-      "https://github.com/owner/repo/releases/download/v1.0.0/Test-1.0.0-linux-x86-64.AppImage",
+      "https://git.mairup.space/owner/repo/releases/download/v1.0.0/Test-1.0.0-linux-x86-64.AppImage",
     );
   });
 }
