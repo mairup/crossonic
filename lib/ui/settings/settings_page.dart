@@ -137,6 +137,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     "It's free software under the MPL-2.0 license.",
                   ),
                   const SizedBox(height: 12),
+                  const Text(
+                    "This build is the Crossonic fork maintained by Mai.",
+                  ),
+                  const SizedBox(height: 12),
                   MouseRegion(
                     cursor: SystemMouseCursors.click,
                     child: GestureDetector(
@@ -153,6 +157,16 @@ class _SettingsPageState extends State<SettingsPage> {
                         Uri.parse("https://github.com/juho05/crossonic"),
                       ),
                       child: Text("Source Code", style: linkStyle),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri.parse("https://git.mairup.space/mai/crossonic"),
+                      ),
+                      child: Text("Fork Source Code", style: linkStyle),
                     ),
                   ),
                   const SizedBox(height: 8),
