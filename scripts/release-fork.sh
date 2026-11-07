@@ -61,8 +61,12 @@ LAST_TAG=$(cat "$STATE/last_tag" 2>/dev/null || echo "")
 NEED_DEV=0; NEED_WEB=0; NEED_APP=0
 [ "$DEV_SHA" != "$LAST_DEV" ] && NEED_DEV=1
 [ "$MAIN_SHA" != "$LAST_MAIN" ] && NEED_WEB=1
+# a tag pushed by a previous run (or by hand) without a published app release
+# still needs publish_app, so it must be part of the nothing-to-do check
+NEWEST_TAG=$(git tag -l 'v*' --merged origin/main | sort -V | tail -1)
+[ -n "$NEWEST_TAG" ] && [ "$NEWEST_TAG" != "$LAST_TAG" ] && NEED_APP=1
 
-if [ "$NEED_DEV" -eq 0 ] && [ "$NEED_WEB" -eq 0 ] && [ "$LAST_TAG" != "" ]; then
+if [ "$NEED_DEV" -eq 0 ] && [ "$NEED_WEB" -eq 0 ] && [ "$NEED_APP" -eq 0 ]; then
   log "nothing to do (dev ${DEV_SHA:0:7}, main ${MAIN_SHA:0:7}, $LAST_TAG published)"
   exit 0
 fi
@@ -98,7 +102,10 @@ build_web_zip() {
 }
 
 bust_bootstrap() { # $1 = remote dir, $2 = sha to bake in; quote-free sed (remote shell is fish)
-  ssh "$MAI_AI" "cd $1/web && sed -i -e 's|\?v=[a-zA-Z0-9]\{3,\}|?v=TMP|g' -e 's|main\.dart\.js\([^a-z]\)|main.dart.js?v=$2\1|g' -e 's|main\.dart\.mjs\([^a-z]\)|main.dart.mjs?v=$2\1|g' -e 's|main\.dart\.wasm\([^a-z]\)|main.dart.wasm?v=$2\1|g' -e 's|?v=TMP|?v=$2|g' flutter_bootstrap.js"
+  # -n is load-bearing: the service runs this script via `git show | bash`, so
+  # the script itself is bash's stdin and an ssh without -n would consume the
+  # rest of it, silently truncating the run after the first deploy
+  ssh -n "$MAI_AI" "cd $1/web && sed -i -e 's|\?v=[a-zA-Z0-9]\{3,\}|?v=TMP|g' -e 's|main\.dart\.js\([^a-z]\)|main.dart.js?v=$2\1|g' -e 's|main\.dart\.mjs\([^a-z]\)|main.dart.mjs?v=$2\1|g' -e 's|main\.dart\.wasm\([^a-z]\)|main.dart.wasm?v=$2\1|g' -e 's|?v=TMP|?v=$2|g' flutter_bootstrap.js"
 }
 
 deploy_web_to() { # $1 = remote dir, $2 = sha, $3 = public check URL, $4 = state file, $5 = label
@@ -106,7 +113,8 @@ deploy_web_to() { # $1 = remote dir, $2 = sha, $3 = public check URL, $4 = state
   build_web_zip || return 1
   if [ "$DRY" -eq 1 ]; then log "DRY: $label web $VER built, not deployed"; return 0; fi
   scp -q "$STATE/Crossonic-$VER-web.zip" "$STATE/Crossonic-$VER-SHA256SUMS.txt" "$MAI_AI:$rdir/"
-  if ! ssh "$MAI_AI" "cd $rdir && sha256sum -c 'Crossonic-$VER-SHA256SUMS.txt' && unzip -oq 'Crossonic-$VER-web.zip' -d web"; then
+  # -n as in bust_bootstrap: keep ssh from eating the piped script on stdin
+  if ! ssh -n "$MAI_AI" "cd $rdir && sha256sum -c 'Crossonic-$VER-SHA256SUMS.txt' && unzip -oq 'Crossonic-$VER-web.zip' -d web"; then
     log "FATAL: $label deploy to mai-ai failed"; notify "⚠️ crossonic pipeline: $label web deploy failed"; return 1
   fi
   if ! bust_bootstrap "$rdir" "$sha"; then
@@ -222,7 +230,5 @@ if [ "$NEED_WEB" -eq 1 ]; then
   fi
 fi
 
-NEWEST_TAG=$(git tag -l 'v*' --merged origin/main | sort -V | tail -1)
-[ -n "$NEWEST_TAG" ] && [ "$NEWEST_TAG" != "$LAST_TAG" ] && NEED_APP=1
 [ "$NEED_APP" -eq 1 ] && { publish_app || exit 1; }
 log "run complete"

@@ -19,9 +19,16 @@ class VersionRepository {
   static Future<Version?>? _previousVersion;
 
   static Future<Version> getCurrentVersion() async {
-    return _currentVersion ??= Version.parse(
-      (await PackageInfo.fromPlatform()).version,
-    );
+    if (_currentVersion != null) return _currentVersion!;
+    final info = await PackageInfo.fromPlatform();
+    // Android's versionName is the pubspec version without the +build part,
+    // so recombine it: the fork counts its own releases in the build number
+    // (0.5.3+19) and Version compares it as the revision
+    final build = int.tryParse(info.buildNumber);
+    final version = build == null || info.version.contains("+")
+        ? info.version
+        : "${info.version}+$build";
+    return _currentVersion ??= Version.parse(version);
   }
 
   /// Returns the version of the previous app launch, null on the first
