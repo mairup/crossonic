@@ -39,6 +39,9 @@ class _UpdatesPageState extends State<UpdatesPage> {
   bool _checking = false;
   Timer? _restartTimer;
 
+  AppImageRepository? _appImageRepo;
+  bool? _integrated;
+
   @override
   void initState() {
     super.initState();
@@ -71,6 +74,13 @@ class _UpdatesPageState extends State<UpdatesPage> {
     if (AutoUpdateRepository.autoUpdatesSupported(systemIntegrationConfig)) {
       _autoUpdateRepo = context.read<AutoUpdateRepository>();
       _autoUpdateRepo?.addListener(_onRepoChanged);
+    }
+
+    if (AppImageRepository.isAppImage) {
+      _appImageRepo = context.read<AppImageRepository>();
+      _appImageRepo!.isIntegrated().then((v) {
+        if (mounted) setState(() => _integrated = v);
+      });
     }
 
     _currentVersion = await VersionRepository.getCurrentVersion();
@@ -149,6 +159,16 @@ class _UpdatesPageState extends State<UpdatesPage> {
     }
 
     await repo.update(pending);
+  }
+
+  Future<void> _integrate() async {
+    try {
+      await _appImageRepo!.integrate();
+    } on Exception {
+      if (mounted) Toast.show(context, "Failed to integrate AppImage!");
+      return;
+    }
+    Restart.restart();
   }
 
   @override
@@ -351,15 +371,31 @@ class _UpdatesPageState extends State<UpdatesPage> {
                         );
                       },
                     ),
-                  if (AppImageRepository.isAppImage) ...[
+                  if (_appImageRepo != null) ...[
                     const Divider(height: 1),
                     ListTile(
-                      leading: const Icon(Icons.layers_outlined),
-                      title: const Text("AppImage Location"),
-                      subtitle: Text(
-                        AppImageRepository.appImageFile.path,
-                        style: Theme.of(context).textTheme.bodySmall,
+                      leading: const Icon(Icons.install_desktop),
+                      title: Text(
+                        _integrated == null
+                            ? "Desktop integration: checking..."
+                            : _integrated!
+                                ? "Desktop integration: installed"
+                                : "Desktop integration: not installed",
                       ),
+                      subtitle: Text(
+                        "Moves the AppImage to ~/.local/bin and adds a launcher entry and window icon.\n"
+                        "${AppImageRepository.appImageFile.path}",
+                      ),
+                      isThreeLine: true,
+                      trailing: _integrated == true
+                          ? OutlinedButton(
+                              onPressed: _integrate,
+                              child: const Text("Re-integrate"),
+                            )
+                          : FilledButton(
+                              onPressed: _integrated == null ? null : _integrate,
+                              child: const Text("Integrate"),
+                            ),
                     ),
                   ],
                 ],

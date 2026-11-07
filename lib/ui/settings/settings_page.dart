@@ -15,7 +15,6 @@ import 'package:crossonic/ui/common/dialogs/confirmation.dart';
 import 'package:crossonic/ui/settings/settings_viewmodel.dart';
 import 'package:crossonic/utils/exit.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_system_integration/flutter_system_integration.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -104,12 +103,6 @@ class _SettingsPageState extends State<SettingsPage> {
               title: const Text("Updates"),
               trailing: const Icon(Icons.arrow_forward_ios),
               onTap: () => context.router.push(UpdatesRoute()),
-            ),
-          if (AppImageRepository.isAppImage)
-            ListTile(
-              title: const Text("AppImage Integration"),
-              trailing: const Icon(Icons.arrow_forward_ios),
-              onTap: () => context.router.push(const AppImageRoute()),
             ),
           ListTile(
             title: const Text("About"),

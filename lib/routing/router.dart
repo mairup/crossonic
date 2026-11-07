@@ -12,7 +12,6 @@ import 'package:crossonic/routing/auth_guard.dart';
 import 'package:crossonic/routing/main_toplevel_guard.dart';
 import 'package:crossonic/routing/router.gr.dart';
 import 'package:crossonic/system_integration.dart';
-import 'package:flutter_system_integration/flutter_system_integration.dart';
 
 @AutoRouterConfig(replaceInRouteName: 'Screen|Page,Route')
 class AppRouter extends RootStackRouter {
@@ -255,27 +254,12 @@ class AppRouter extends RootStackRouter {
       title: (context, data) => "Message Details",
       restorationId: (match) => match.fullPath,
     ),
-    if (AppImageRepository.isAppImage)
-      AutoRoute(
-        path: "/settings/appimage",
-        page: AppImageRoute.page,
-        title: (context, data) => "AppImage Integration",
-        restorationId: (match) => match.fullPath,
-      ),
     if (!systemIntegrationConfig.versionCheckExternallyDisabled) ...[
       AutoRoute(
         path: "/settings/updates",
         page: UpdatesRoute.page,
         title: (context, data) => "Updates",
         restorationId: (match) => match.fullPath,
-      ),
-      RedirectRoute(
-        path: "/settings/versionChecking",
-        redirectTo: "/settings/updates",
-      ),
-      RedirectRoute(
-        path: "/installUpdate",
-        redirectTo: "/settings/updates",
       ),
     ],
     AutoRoute(
