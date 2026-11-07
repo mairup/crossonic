@@ -61,8 +61,12 @@ LAST_TAG=$(cat "$STATE/last_tag" 2>/dev/null || echo "")
 NEED_DEV=0; NEED_WEB=0; NEED_APP=0
 [ "$DEV_SHA" != "$LAST_DEV" ] && NEED_DEV=1
 [ "$MAIN_SHA" != "$LAST_MAIN" ] && NEED_WEB=1
+# a tag pushed by a previous run (or by hand) without a published app release
+# still needs publish_app, so it must be part of the nothing-to-do check
+NEWEST_TAG=$(git tag -l 'v*' --merged origin/main | sort -V | tail -1)
+[ -n "$NEWEST_TAG" ] && [ "$NEWEST_TAG" != "$LAST_TAG" ] && NEED_APP=1
 
-if [ "$NEED_DEV" -eq 0 ] && [ "$NEED_WEB" -eq 0 ] && [ "$LAST_TAG" != "" ]; then
+if [ "$NEED_DEV" -eq 0 ] && [ "$NEED_WEB" -eq 0 ] && [ "$NEED_APP" -eq 0 ]; then
   log "nothing to do (dev ${DEV_SHA:0:7}, main ${MAIN_SHA:0:7}, $LAST_TAG published)"
   exit 0
 fi
@@ -222,7 +226,5 @@ if [ "$NEED_WEB" -eq 1 ]; then
   fi
 fi
 
-NEWEST_TAG=$(git tag -l 'v*' --merged origin/main | sort -V | tail -1)
-[ -n "$NEWEST_TAG" ] && [ "$NEWEST_TAG" != "$LAST_TAG" ] && NEED_APP=1
 [ "$NEED_APP" -eq 1 ] && { publish_app || exit 1; }
 log "run complete"
