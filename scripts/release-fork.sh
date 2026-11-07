@@ -51,10 +51,11 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-# --prune-tags: tags deleted on the remote (e.g. mis-versioned ones removed in
-# a cleanup) must disappear locally too, otherwise NEWEST_TAG keeps picking the
-# stale tag and no new release is ever published
-git fetch origin --tags --prune-tags --quiet || { log "FATAL: fetch origin failed"; notify "⚠️ crossonic pipeline: git fetch failed"; exit 1; }
+# explicit refspecs + --prune: tags deleted on the remote (e.g. mis-versioned
+# ones removed in a cleanup) must disappear locally too, otherwise NEWEST_TAG
+# keeps resolving to the stale tag and no new release is ever published
+# (--tags --prune-tags alone does not prune when remote.origin.fetch is unset)
+git fetch --prune --quiet origin "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*" || { log "FATAL: fetch origin failed"; notify "⚠️ crossonic pipeline: git fetch failed"; exit 1; }
 MAIN_SHA=$(git rev-parse origin/main)
 DEV_SHA=$(git rev-parse origin/dev)
 LAST_MAIN=$(cat "$STATE/last_main" 2>/dev/null || echo "")
