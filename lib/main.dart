@@ -140,7 +140,10 @@ void main() async {
         child: Builder(
           builder: (context) {
             final routerConfig = AppRouter(authRepository: context.read())
-                .config(reevaluateListenable: context.read<AuthRepository>());
+                .config(
+                  reevaluateListenable: context.read<AuthRepository>(),
+                  deepLinkBuilder: tabRootDeepLinkBuilder,
+                );
             return MainApp(routerConfig: routerConfig);
           },
         ),

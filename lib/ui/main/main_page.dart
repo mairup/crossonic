@@ -22,6 +22,7 @@ import 'package:crossonic/ui/main/now_playing/now_playing_expanded.dart';
 import 'package:crossonic/ui/main/now_playing/now_playing_viewmodel.dart';
 import 'package:crossonic/ui/main/queue_fab.dart';
 import 'package:crossonic/version_checker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:predictive_transition/predictive_transition.dart';
 import 'package:provider/provider.dart';
@@ -157,11 +158,16 @@ class _MainPageState extends State<MainPage> {
                       tabsRouter.setActiveIndex(index);
 
                       final destRouter = tabsRouter.stackRouterOfIndex(index);
-                      if (destRouter != null &&
-                          destRouter.stack.isNotEmpty &&
-                          destRouter.stack.first.name != targetRouteName &&
-                          targetRoute != null) {
-                        destRouter.replaceAll([targetRoute]);
+                      if (destRouter != null) {
+                        rootTabStack(
+                          destRouter,
+                          targetRoute: targetRoute,
+                          targetRouteName: targetRouteName,
+                          // on web the URL is re-derived from browser history
+                          // when the tab is revived from background, so the
+                          // destination tab is always reset to its root there
+                          resetToRoot: kIsWeb,
+                        );
                       }
                     }
 
@@ -492,6 +498,25 @@ class _MainPageState extends State<MainPage> {
     _nowPlayingViewModel.dispose();
     _layoutModeManager.dispose();
     super.dispose();
+  }
+}
+
+/// Roots [router]'s stack at [targetRouteName] when it isn't already rooted
+/// there (stack was built from a deep URL), and pops it to the root when
+/// [resetToRoot] is set (web, where the URL defines the tab root on reload).
+void rootTabStack(
+  StackRouter router, {
+  required PageRouteInfo? targetRoute,
+  required String targetRouteName,
+  required bool resetToRoot,
+}) {
+  if (router.stack.isEmpty || targetRoute == null) return;
+  if (router.stack.first.name == targetRouteName) {
+    if (resetToRoot && router.canPop(ignoreParentRoutes: true)) {
+      router.popUntilRoot();
+    }
+  } else {
+    router.replaceAll([targetRoute]);
   }
 }
 

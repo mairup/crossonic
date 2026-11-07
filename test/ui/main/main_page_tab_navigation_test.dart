@@ -7,10 +7,19 @@
  */
 
 import 'package:auto_route/auto_route.dart';
+import 'package:crossonic/ui/main/main_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+// simulates kIsWeb for rootTabStack in the test harness (kIsWeb is a const
+// false under flutter_test)
+var webMode = false;
+
 void main() {
+  setUp(() {
+    webMode = false;
+  });
+
   testWidgets(
     'switchTab resets to root when tab was initialized on a child route',
     (tester) async {
@@ -81,6 +90,80 @@ void main() {
     expect(find.text('Home Screen'), findsOneWidget);
     expect(find.text('Artist: art-456'), findsNothing);
   });
+
+  testWidgets(
+    'switchTab resets destination tab to root on web when switching to it',
+    (tester) async {
+      webMode = true;
+      final router = TestAppRouter();
+      await tester.pumpWidget(
+        MaterialApp.router(
+          routerConfig: router.config(
+            deepLinkBuilder: (_) => const DeepLink([
+              TestMainRoute(
+                children: [
+                  TestHomeTabRoute(children: [TestHomeRoute()]),
+                ],
+              ),
+            ]),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final tabsRouter = router.innerRouterOf<TabsRouter>(TestMainRoute.name)!;
+      final homeStack = tabsRouter.stackRouterOfIndex(0)!;
+      homeStack.push(TestArtistRoute(artistId: 'art-789'));
+      await tester.pumpAndSettle();
+      expect(find.text('Artist: art-789'), findsOneWidget);
+
+      // switch away to Browse and back to Home, simulating web (kIsWeb)
+      await tester.tap(find.byKey(const ValueKey('browse_destination')));
+      await tester.pumpAndSettle();
+      expect(find.text('Browse Screen'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('home_destination')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Home Screen'), findsOneWidget);
+      expect(find.text('Artist: art-789'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'switchTab keeps destination tab stack on native when switching to it',
+    (tester) async {
+      final router = TestAppRouter();
+      await tester.pumpWidget(
+        MaterialApp.router(
+          routerConfig: router.config(
+            deepLinkBuilder: (_) => const DeepLink([
+              TestMainRoute(
+                children: [
+                  TestHomeTabRoute(children: [TestHomeRoute()]),
+                ],
+              ),
+            ]),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final tabsRouter = router.innerRouterOf<TabsRouter>(TestMainRoute.name)!;
+      final homeStack = tabsRouter.stackRouterOfIndex(0)!;
+      homeStack.push(TestArtistRoute(artistId: 'art-789'));
+      await tester.pumpAndSettle();
+      expect(find.text('Artist: art-789'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('browse_destination')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home_destination')));
+      await tester.pumpAndSettle();
+
+      // native keeps the deep stack: the artist page is still on top
+      expect(find.text('Artist: art-789'), findsOneWidget);
+    },
+  );
 }
 
 // Minimal reproduction routes and router matching Crossonic structure
@@ -204,14 +287,12 @@ class TestMainPage extends StatelessWidget {
 
           if (index == tabsRouter.activeIndex) {
             if (router != null) {
-              if (router.stack.isNotEmpty &&
-                  router.stack.first.name == targetRouteName) {
-                if (router.canPop(ignoreParentRoutes: true)) {
-                  router.popUntilRoot();
-                }
-              } else if (targetRoute != null) {
-                router.replaceAll([targetRoute]);
-              }
+              rootTabStack(
+                router,
+                targetRoute: targetRoute,
+                targetRouteName: targetRouteName,
+                resetToRoot: true,
+              );
             }
             return;
           }
@@ -219,11 +300,13 @@ class TestMainPage extends StatelessWidget {
           tabsRouter.setActiveIndex(index);
 
           final destRouter = tabsRouter.stackRouterOfIndex(index);
-          if (destRouter != null &&
-              destRouter.stack.isNotEmpty &&
-              destRouter.stack.first.name != targetRouteName &&
-              targetRoute != null) {
-            destRouter.replaceAll([targetRoute]);
+          if (destRouter != null) {
+            rootTabStack(
+              destRouter,
+              targetRoute: targetRoute,
+              targetRouteName: targetRouteName,
+              resetToRoot: webMode,
+            );
           }
         }
 

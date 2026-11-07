@@ -276,3 +276,46 @@ class AppRouter extends RootStackRouter {
     ),
   ];
 }
+
+/// Tab shell route name -> name of the route that roots the shell's stack.
+const Map<String, String> _tabRootRouteNames = {
+  "HomeTab": HomeRoute.name,
+  "BrowseTab": BrowseRoute.name,
+  "PlaylistTab": PlaylistsRoute.name,
+};
+
+/// Deep link builder that roots every tab shell at its root route.
+///
+/// On web the URL is the source of truth on cold start and on every browser
+/// history event (popstate), and a deep URL like /home/artist/:id would
+/// otherwise rebuild the home tab stack with the artist page as its first
+/// entry, so the home button would no longer know where the tab root is.
+DeepLink tabRootDeepLinkBuilder(PlatformDeepLink link) =>
+    DeepLink(rootedTabRoutes(link.matches));
+
+/// Returns [matches] as route infos with tab shells rooted at their root
+/// route (e.g. HomeTab[HomeRoute, ArtistRoute] instead of HomeTab[ArtistRoute]).
+List<PageRouteInfo> rootedTabRoutes(List<RouteMatch> matches) {
+  return matches.map(_rootedTabMatch).toList();
+}
+
+PageRouteInfo _rootedTabMatch(RouteMatch match) {
+  final rootName = _tabRootRouteNames[match.name];
+  var children = match.children?.map(_rootedTabMatch).toList();
+  if (rootName != null &&
+      children != null &&
+      children.isNotEmpty &&
+      children.first.routeName != rootName) {
+    children = [PageRouteInfo(rootName), ...children];
+  }
+  return PageRouteInfo(
+    match.name,
+    rawPathParams: match.params.rawMap,
+    rawQueryParams: match.queryParams.rawMap,
+    fragment: match.fragment,
+    redirectedFrom: match.redirectedFrom,
+    stringMatch: match.stringMatch,
+    args: match.args,
+    initialChildren: children,
+  );
+}
