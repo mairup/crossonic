@@ -262,13 +262,22 @@ class AppRouter extends RootStackRouter {
         title: (context, data) => "AppImage Integration",
         restorationId: (match) => match.fullPath,
       ),
-    if (!systemIntegrationConfig.versionCheckExternallyDisabled)
+    if (!systemIntegrationConfig.versionCheckExternallyDisabled) ...[
       AutoRoute(
-        path: "/settings/versionChecking",
-        page: VersionCheckingRoute.page,
-        title: (context, data) => "Version Checking",
+        path: "/settings/updates",
+        page: UpdatesRoute.page,
+        title: (context, data) => "Updates",
         restorationId: (match) => match.fullPath,
       ),
+      RedirectRoute(
+        path: "/settings/versionChecking",
+        redirectTo: "/settings/updates",
+      ),
+      RedirectRoute(
+        path: "/installUpdate",
+        redirectTo: "/settings/updates",
+      ),
+    ],
     AutoRoute(
       path: "/lyrics",
       page: LyricsRoute.page,
@@ -279,12 +288,6 @@ class AppRouter extends RootStackRouter {
       path: "/cast",
       page: CastingRoute.page,
       title: (context, data) => "Casting",
-      restorationId: (match) => match.fullPath,
-    ),
-    AutoRoute(
-      path: "/installUpdate",
-      page: InstallUpdateRoute.page,
-      title: (context, data) => "Install Update",
       restorationId: (match) => match.fullPath,
     ),
   ];

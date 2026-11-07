@@ -101,9 +101,9 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           if (!systemIntegrationConfig.versionCheckExternallyDisabled)
             ListTile(
-              title: const Text("Version Checking"),
+              title: const Text("Updates"),
               trailing: const Icon(Icons.arrow_forward_ios),
-              onTap: () => context.router.push(const VersionCheckingRoute()),
+              onTap: () => context.router.push(UpdatesRoute()),
             ),
           if (AppImageRepository.isAppImage)
             ListTile(
