@@ -12,12 +12,19 @@ class Version implements Comparable<Version> {
   final int minor;
   final int patch;
 
+  /// Fork release counter from the build metadata (0.5.3+19 = upstream
+  /// 0.5.3 plus fork build 19). pub forbids a 4th numeric component, so the
+  /// fork tracks its own releases in the +build part and it is compared
+  /// instead of ignored. 0 when absent or non-numeric.
+  final int revision;
+
   final bool isFullVersion;
 
   const Version({
     required this.major,
     this.minor = 0,
     this.patch = 0,
+    this.revision = 0,
     this.isFullVersion = true,
   });
 
@@ -26,7 +33,12 @@ class Version implements Comparable<Version> {
     if (v.startsWith("v") && v.length > 1) {
       v = v.substring(1);
     }
-    v = v.split("+")[0];
+    final buildIndex = v.indexOf("+");
+    final build = buildIndex == -1 ? null : v.substring(buildIndex + 1);
+    if (buildIndex != -1) {
+      v = v.substring(0, buildIndex);
+    }
+    final revision = int.tryParse(build ?? "") ?? 0;
     final prereleaseIndex = v.indexOf("-");
     final core = prereleaseIndex == -1 ? v : v.substring(0, prereleaseIndex);
     final parts = core.split(".");
@@ -41,6 +53,7 @@ class Version implements Comparable<Version> {
       major: numbers[0]!,
       minor: numbers.length > 1 ? numbers[1]! : 0,
       patch: numbers.length > 2 ? numbers[2]! : 0,
+      revision: revision,
       isFullVersion: prereleaseIndex == -1,
     );
   }
@@ -52,6 +65,8 @@ class Version implements Comparable<Version> {
     if (minor < other.minor) return false;
     if (patch > other.patch) return true;
     if (patch < other.patch) return false;
+    if (revision > other.revision) return true;
+    if (revision < other.revision) return false;
     return isFullVersion && !other.isFullVersion;
   }
 
@@ -67,11 +82,12 @@ class Version implements Comparable<Version> {
     return major == other.major &&
         minor == other.minor &&
         patch == other.patch &&
+        revision == other.revision &&
         isFullVersion == other.isFullVersion;
   }
 
   @override
-  int get hashCode => Object.hash(major, minor, patch, isFullVersion);
+  int get hashCode => Object.hash(major, minor, patch, revision, isFullVersion);
 
   @override
   int compareTo(Version other) {
@@ -81,7 +97,8 @@ class Version implements Comparable<Version> {
 
   @override
   String toString() {
-    final v = "$major.$minor.$patch";
+    var v = "$major.$minor.$patch";
+    if (revision > 0) v += "+$revision";
     if (isFullVersion) return v;
     return "$v-prerelease";
   }
@@ -90,6 +107,7 @@ class Version implements Comparable<Version> {
     major: (json["major"] as num).toInt(),
     minor: (json["minor"] as num?)?.toInt() ?? 0,
     patch: (json["patch"] as num?)?.toInt() ?? 0,
+    revision: (json["revision"] as num?)?.toInt() ?? 0,
     isFullVersion: json["isFullVersion"] as bool? ?? true,
   );
 
@@ -97,6 +115,7 @@ class Version implements Comparable<Version> {
     "major": major,
     "minor": minor,
     "patch": patch,
+    "revision": revision,
     "isFullVersion": isFullVersion,
   };
 }
