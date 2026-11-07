@@ -102,7 +102,10 @@ build_web_zip() {
 }
 
 bust_bootstrap() { # $1 = remote dir, $2 = sha to bake in; quote-free sed (remote shell is fish)
-  ssh "$MAI_AI" "cd $1/web && sed -i -e 's|\?v=[a-zA-Z0-9]\{3,\}|?v=TMP|g' -e 's|main\.dart\.js\([^a-z]\)|main.dart.js?v=$2\1|g' -e 's|main\.dart\.mjs\([^a-z]\)|main.dart.mjs?v=$2\1|g' -e 's|main\.dart\.wasm\([^a-z]\)|main.dart.wasm?v=$2\1|g' -e 's|?v=TMP|?v=$2|g' flutter_bootstrap.js"
+  # -n is load-bearing: the service runs this script via `git show | bash`, so
+  # the script itself is bash's stdin and an ssh without -n would consume the
+  # rest of it, silently truncating the run after the first deploy
+  ssh -n "$MAI_AI" "cd $1/web && sed -i -e 's|\?v=[a-zA-Z0-9]\{3,\}|?v=TMP|g' -e 's|main\.dart\.js\([^a-z]\)|main.dart.js?v=$2\1|g' -e 's|main\.dart\.mjs\([^a-z]\)|main.dart.mjs?v=$2\1|g' -e 's|main\.dart\.wasm\([^a-z]\)|main.dart.wasm?v=$2\1|g' -e 's|?v=TMP|?v=$2|g' flutter_bootstrap.js"
 }
 
 deploy_web_to() { # $1 = remote dir, $2 = sha, $3 = public check URL, $4 = state file, $5 = label
@@ -110,7 +113,8 @@ deploy_web_to() { # $1 = remote dir, $2 = sha, $3 = public check URL, $4 = state
   build_web_zip || return 1
   if [ "$DRY" -eq 1 ]; then log "DRY: $label web $VER built, not deployed"; return 0; fi
   scp -q "$STATE/Crossonic-$VER-web.zip" "$STATE/Crossonic-$VER-SHA256SUMS.txt" "$MAI_AI:$rdir/"
-  if ! ssh "$MAI_AI" "cd $rdir && sha256sum -c 'Crossonic-$VER-SHA256SUMS.txt' && unzip -oq 'Crossonic-$VER-web.zip' -d web"; then
+  # -n as in bust_bootstrap: keep ssh from eating the piped script on stdin
+  if ! ssh -n "$MAI_AI" "cd $rdir && sha256sum -c 'Crossonic-$VER-SHA256SUMS.txt' && unzip -oq 'Crossonic-$VER-web.zip' -d web"; then
     log "FATAL: $label deploy to mai-ai failed"; notify "⚠️ crossonic pipeline: $label web deploy failed"; return 1
   fi
   if ! bust_bootstrap "$rdir" "$sha"; then
