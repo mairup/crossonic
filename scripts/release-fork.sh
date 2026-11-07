@@ -51,7 +51,10 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-git fetch origin --tags --quiet || { log "FATAL: fetch origin failed"; notify "⚠️ crossonic pipeline: git fetch failed"; exit 1; }
+# --prune-tags: tags deleted on the remote (e.g. mis-versioned ones removed in
+# a cleanup) must disappear locally too, otherwise NEWEST_TAG keeps picking the
+# stale tag and no new release is ever published
+git fetch origin --tags --prune-tags --quiet || { log "FATAL: fetch origin failed"; notify "⚠️ crossonic pipeline: git fetch failed"; exit 1; }
 MAIN_SHA=$(git rev-parse origin/main)
 DEV_SHA=$(git rev-parse origin/dev)
 LAST_MAIN=$(cat "$STATE/last_main" 2>/dev/null || echo "")
