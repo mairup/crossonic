@@ -22,6 +22,7 @@ import 'package:crossonic/ui/main/now_playing/now_playing_expanded.dart';
 import 'package:crossonic/ui/main/now_playing/now_playing_viewmodel.dart';
 import 'package:crossonic/ui/main/queue_fab.dart';
 import 'package:crossonic/version_checker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:predictive_transition/predictive_transition.dart';
 import 'package:provider/provider.dart';
@@ -123,21 +124,31 @@ class _MainPageState extends State<MainPage> {
                         return;
                       }
 
+                      final (targetRoute, targetRouteName) = switch (index) {
+                        0 => (const HomeRoute(), HomeRoute.name),
+                        1 => (const BrowseRoute(), BrowseRoute.name),
+                        2 => (const PlaylistsRoute(), PlaylistsRoute.name),
+                        _ => (null, ""),
+                      };
+
+                      final router = tabsRouter.stackRouterOfIndex(index);
+
                       if (index == tabsRouter.activeIndex) {
-                        final routeName = switch (index) {
-                          0 => "HomeRoute",
-                          1 => "BrowseRoute",
-                          2 => "PlaylistsRoute",
-                          _ => "",
-                        };
-                        final router = tabsRouter.childControllers.firstWhere(
-                          (c) => c.stack.first.name == routeName,
-                        );
-                        while (router.canPop()) {
-                          await router.maybePop();
+                        if (router != null) {
+                          if (router.stack.isNotEmpty &&
+                              router.stack.first.name == targetRouteName) {
+                            if (router.canPop(ignoreParentRoutes: true)) {
+                              router.popUntilRoot();
+                            } else if (index == 0) {
+                              context.read<HomeViewModel>().refresh(false);
+                            }
+                          } else if (targetRoute != null) {
+                            router.replaceAll([targetRoute]);
+                          }
                         }
                         return;
                       }
+
                       switch (index) {
                         case 0:
                           context.read<HomeViewModel>().refresh(false);
@@ -145,6 +156,19 @@ class _MainPageState extends State<MainPage> {
                           context.read<PlaylistRepository>().refresh();
                       }
                       tabsRouter.setActiveIndex(index);
+
+                      final destRouter = tabsRouter.stackRouterOfIndex(index);
+                      if (destRouter != null) {
+                        rootTabStack(
+                          destRouter,
+                          targetRoute: targetRoute,
+                          targetRouteName: targetRouteName,
+                          // on web the URL is re-derived from browser history
+                          // when the tab is revived from background, so the
+                          // destination tab is always reset to its root there
+                          resetToRoot: kIsWeb,
+                        );
+                      }
                     }
 
                     return ChangeNotifierProvider.value(
@@ -474,6 +498,25 @@ class _MainPageState extends State<MainPage> {
     _nowPlayingViewModel.dispose();
     _layoutModeManager.dispose();
     super.dispose();
+  }
+}
+
+/// Roots [router]'s stack at [targetRouteName] when it isn't already rooted
+/// there (stack was built from a deep URL), and pops it to the root when
+/// [resetToRoot] is set (web, where the URL defines the tab root on reload).
+void rootTabStack(
+  StackRouter router, {
+  required PageRouteInfo? targetRoute,
+  required String targetRouteName,
+  required bool resetToRoot,
+}) {
+  if (router.stack.isEmpty || targetRoute == null) return;
+  if (router.stack.first.name == targetRouteName) {
+    if (resetToRoot && router.canPop(ignoreParentRoutes: true)) {
+      router.popUntilRoot();
+    }
+  } else {
+    router.replaceAll([targetRoute]);
   }
 }
 

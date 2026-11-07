@@ -9,6 +9,14 @@ other [(Open)Subsonic](https://opensubsonic.netlify.app/) compatible music serve
 
 [Install](https://crossonic.org/app/install)
 
+## Fork
+
+This repository is a fork of [juho05/crossonic](https://github.com/juho05/crossonic) maintained by
+**Mai** — [git.mairup.space/mai/crossonic](https://git.mairup.space/mai/crossonic)
+(mirror: [github.com/mairup/crossonic](https://github.com/mairup/crossonic)).
+It adds an in-app auto-updater and is deployed as a web app at
+[music.mairup.space](https://music.mairup.space).
+
 ## Status
 
 This app is still in development. Some features are missing and bugs are to be expected.

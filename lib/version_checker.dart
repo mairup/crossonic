@@ -11,9 +11,9 @@ import 'package:crossonic/routing/router.gr.dart';
 import 'package:crossonic/system_integration.dart';
 import 'package:crossonic/ui/common/adaptive_dialog_action.dart';
 import 'package:crossonic/ui/common/toast.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_system_integration/flutter_system_integration.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -39,6 +39,9 @@ class VersionChecker extends StatelessWidget {
         }
         if (viewModel.newVersionAvailable && !viewModel.isOpen) {
           SchedulerBinding.instance.addPostFrameCallback((_) {
+            final canAutoUpdate = AutoUpdateRepository.autoUpdatesSupported(
+              systemIntegrationConfig,
+            );
             final actions = [
               AdaptiveDialogAction(
                 onPressed: () =>
@@ -48,20 +51,19 @@ class VersionChecker extends StatelessWidget {
               AdaptiveDialogAction(
                 onPressed: () =>
                     Navigator.pop(context, VersionDialogChoice.remind),
-                child: const Text("Remind later"),
+                child: const Text("Later"),
               ),
-              AdaptiveDialogAction(
-                onPressed: () =>
-                    Navigator.pop(context, VersionDialogChoice.view),
-                child: const Text("View"),
-              ),
-              if (AutoUpdateRepository.autoUpdatesSupported(
-                systemIntegrationConfig,
-              ))
+              if (canAutoUpdate)
                 AdaptiveDialogAction(
                   onPressed: () =>
                       Navigator.pop(context, VersionDialogChoice.install),
-                  child: const Text("Install"),
+                  child: const Text("Update & Restart"),
+                )
+              else
+                AdaptiveDialogAction(
+                  onPressed: () =>
+                      Navigator.pop(context, VersionDialogChoice.view),
+                  child: const Text("View Release"),
                 ),
             ];
             viewModel.isOpen = true;
@@ -70,9 +72,9 @@ class VersionChecker extends StatelessWidget {
               barrierDismissible: true,
               builder: (context) {
                 return AlertDialog.adaptive(
-                  title: const Text("New version available"),
+                  title: const Text("Update Available"),
                   content: Text(
-                    "Current: v${viewModel.current}\nLatest: v${viewModel.latest}",
+                    "Crossonic v${viewModel.latest} is available (currently v${viewModel.current}).",
                   ),
                   actions: actions,
                 );
@@ -91,12 +93,17 @@ class VersionChecker extends StatelessWidget {
                   break;
                 case VersionDialogChoice.view:
                   launchUrl(systemIntegrationConfig.releasesUrl);
+                  break;
                 case null:
                 case VersionDialogChoice.remind:
                   // default behavior
                   break;
                 case VersionDialogChoice.install:
-                  context.router.push(const InstallUpdateRoute());
+                  await viewModel.displayedVersionDialog();
+                  if (context.mounted) {
+                    context.router.push(UpdatesRoute(autoStart: true));
+                  }
+                  return;
               }
               await viewModel.displayedVersionDialog();
             });

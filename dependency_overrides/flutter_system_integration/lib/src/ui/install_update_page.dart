@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_system_integration/src/auto_update/auto_update_repository.dart';
@@ -28,11 +29,14 @@ class InstallUpdatePage extends StatefulWidget {
   /// Defaults to [showSnackBarMessage].
   final ShowMessageCallback showMessage;
 
+  final bool autoStart;
+
   const InstallUpdatePage({
     super.key,
     required this.autoUpdateRepository,
     this.exitApp,
     this.showMessage = showSnackBarMessage,
+    this.autoStart = false,
   });
 
   @override
@@ -44,17 +48,27 @@ class _InstallUpdatePageState extends State<InstallUpdatePage> {
 
   bool _installing = false;
 
+  Timer? _restartTimer;
+
   @override
   void initState() {
     super.initState();
     final repository = widget.autoUpdateRepository;
     if (repository != null) {
       _viewModel = InstallUpdateViewModel(autoUpdateRepository: repository);
+      if (widget.autoStart && repository.status == AutoUpdateStatus.initial) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _viewModel != null) {
+            _install(_viewModel!);
+          }
+        });
+      }
     }
   }
 
   @override
   void dispose() {
+    _restartTimer?.cancel();
     _viewModel?.dispose();
     super.dispose();
   }
@@ -158,6 +172,15 @@ class _InstallUpdatePageState extends State<InstallUpdatePage> {
 
   Widget _buildContent(BuildContext context, InstallUpdateViewModel viewModel) {
     final status = viewModel.status;
+    if (status == AutoUpdateStatus.success &&
+        Restart.supported &&
+        _restartTimer == null) {
+      _restartTimer = Timer(const Duration(milliseconds: 1500), () {
+        if (mounted) {
+          Restart.restart();
+        }
+      });
+    }
     final running =
         status == AutoUpdateStatus.checkingVersion ||
         status == AutoUpdateStatus.downloading ||
@@ -196,7 +219,9 @@ class _InstallUpdatePageState extends State<InstallUpdatePage> {
             AutoUpdateStatus.checkingVersion => "Checking version...",
             AutoUpdateStatus.downloading => "Downloading...",
             AutoUpdateStatus.installing => "Installing...",
-            AutoUpdateStatus.success => "Update successful!",
+            AutoUpdateStatus.success => Restart.supported
+                ? "Update successful! Restarting..."
+                : "Update successful!",
             AutoUpdateStatus.failure => "Update failed!",
           }, textAlign: TextAlign.center),
           const SizedBox(height: 16),
@@ -221,7 +246,7 @@ class _InstallUpdatePageState extends State<InstallUpdatePage> {
                   exit(0);
                 }
               },
-              child: Text(Restart.supported ? "Restart" : "Exit"),
+              child: Text(Restart.supported ? "Restart now" : "Exit"),
             ),
         ],
       ),

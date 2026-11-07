@@ -12,7 +12,6 @@ import 'package:crossonic/routing/auth_guard.dart';
 import 'package:crossonic/routing/main_toplevel_guard.dart';
 import 'package:crossonic/routing/router.gr.dart';
 import 'package:crossonic/system_integration.dart';
-import 'package:flutter_system_integration/flutter_system_integration.dart';
 
 @AutoRouterConfig(replaceInRouteName: 'Screen|Page,Route')
 class AppRouter extends RootStackRouter {
@@ -255,20 +254,14 @@ class AppRouter extends RootStackRouter {
       title: (context, data) => "Message Details",
       restorationId: (match) => match.fullPath,
     ),
-    if (AppImageRepository.isAppImage)
+    if (!systemIntegrationConfig.versionCheckExternallyDisabled) ...[
       AutoRoute(
-        path: "/settings/appimage",
-        page: AppImageRoute.page,
-        title: (context, data) => "AppImage Integration",
+        path: "/settings/updates",
+        page: UpdatesRoute.page,
+        title: (context, data) => "Updates",
         restorationId: (match) => match.fullPath,
       ),
-    if (!systemIntegrationConfig.versionCheckExternallyDisabled)
-      AutoRoute(
-        path: "/settings/versionChecking",
-        page: VersionCheckingRoute.page,
-        title: (context, data) => "Version Checking",
-        restorationId: (match) => match.fullPath,
-      ),
+    ],
     AutoRoute(
       path: "/lyrics",
       page: LyricsRoute.page,
@@ -281,11 +274,48 @@ class AppRouter extends RootStackRouter {
       title: (context, data) => "Casting",
       restorationId: (match) => match.fullPath,
     ),
-    AutoRoute(
-      path: "/installUpdate",
-      page: InstallUpdateRoute.page,
-      title: (context, data) => "Install Update",
-      restorationId: (match) => match.fullPath,
-    ),
   ];
+}
+
+/// Tab shell route name -> name of the route that roots the shell's stack.
+const Map<String, String> _tabRootRouteNames = {
+  "HomeTab": HomeRoute.name,
+  "BrowseTab": BrowseRoute.name,
+  "PlaylistTab": PlaylistsRoute.name,
+};
+
+/// Deep link builder that roots every tab shell at its root route.
+///
+/// On web the URL is the source of truth on cold start and on every browser
+/// history event (popstate), and a deep URL like /home/artist/:id would
+/// otherwise rebuild the home tab stack with the artist page as its first
+/// entry, so the home button would no longer know where the tab root is.
+DeepLink tabRootDeepLinkBuilder(PlatformDeepLink link) =>
+    DeepLink(rootedTabRoutes(link.matches));
+
+/// Returns [matches] as route infos with tab shells rooted at their root
+/// route (e.g. HomeTab[HomeRoute, ArtistRoute] instead of HomeTab[ArtistRoute]).
+List<PageRouteInfo> rootedTabRoutes(List<RouteMatch> matches) {
+  return matches.map(_rootedTabMatch).toList();
+}
+
+PageRouteInfo _rootedTabMatch(RouteMatch match) {
+  final rootName = _tabRootRouteNames[match.name];
+  var children = match.children?.map(_rootedTabMatch).toList();
+  if (rootName != null &&
+      children != null &&
+      children.isNotEmpty &&
+      children.first.routeName != rootName) {
+    children = [PageRouteInfo(rootName), ...children];
+  }
+  return PageRouteInfo(
+    match.name,
+    rawPathParams: match.params.rawMap,
+    rawQueryParams: match.queryParams.rawMap,
+    fragment: match.fragment,
+    redirectedFrom: match.redirectedFrom,
+    stringMatch: match.stringMatch,
+    args: match.args,
+    initialChildren: children,
+  );
 }

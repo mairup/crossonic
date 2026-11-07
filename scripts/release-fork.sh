@@ -159,6 +159,24 @@ publish_app() {
       log "FATAL: $a not signed by CN=Crossonic Fork — aborting release";
       notify "⚠️ crossonic pipeline: APK signing check failed for $tag"; return 1; }
   done
+
+  log "building linux release bundle"
+  $FLUTTER build linux --release >/dev/null || { log "FATAL: linux build failed"; notify "⚠️ crossonic pipeline: linux build failed"; return 1; }
+  local libmpv_dir=/tmp/crossonic-libmpv
+  mkdir -p "$libmpv_dir/licenses"
+  cp -a /usr/lib/libmpv.so* "$libmpv_dir/" 2>/dev/null || true
+  touch "$libmpv_dir/licenses/mpv.txt"
+  ./scripts/appimage/build.sh "$ver" "$libmpv_dir"
+  mv "Crossonic-$ver-linux-x86-64.AppImage" "$out/Crossonic-$ver-linux-x86-64.AppImage"
+
+  local ver_base="${ver%%+*}"
+  if [ "$ver_base" != "$ver" ]; then
+    cp "$out/Crossonic-$ver-linux-x86-64.AppImage" "$out/Crossonic-$ver_base-linux-x86-64.AppImage"
+    for a in "$out"/Crossonic-$ver-android-*.apk; do
+      cp "$a" "${a/$ver/$ver_base}"
+    done
+  fi
+
   [ -f "$STATE/Crossonic-$VER-web.zip" ] || build_web_zip || return 1
   if [ "$DRY" -eq 1 ]; then log "DRY: release $tag not published"; return 0; fi
   source "$FORGEJO_ENV"
@@ -170,11 +188,13 @@ publish_app() {
   if [ -z "$id" ] || [ "$id" = "null" ]; then
     log "FATAL: Forgejo release create failed"; notify "⚠️ crossonic pipeline: Forgejo release create failed for $tag"; return 1
   fi
-  for a in "$out"/Crossonic-$ver-android-*.apk "$STATE/Crossonic-$VER-web.zip"; do
-    if ! curl -s -X POST -H "Authorization: token $FORGEJO_TOKEN" \
-        -F "attachment=@$a" -F "name=$(basename "$a")" \
-        "$FORGEJO_API_URL/api/v1/repos/mai/crossonic/releases/$id/assets" | jq -e '.name' >/dev/null; then
-      log "FATAL: asset upload failed for $a"; notify "⚠️ crossonic pipeline: asset upload failed for $tag"; return 1
+  for a in "$out"/Crossonic-*-android-*.apk "$out"/Crossonic-*-linux-x86-64.AppImage "$STATE/Crossonic-$VER-web.zip"; do
+    if [ -f "$a" ]; then
+      if ! curl -s -X POST -H "Authorization: token $FORGEJO_TOKEN" \
+          -F "attachment=@$a" -F "name=$(basename "$a")" \
+          "$FORGEJO_API_URL/api/v1/repos/mai/crossonic/releases/$id/assets" | jq -e '.name' >/dev/null; then
+        log "FATAL: asset upload failed for $a"; notify "⚠️ crossonic pipeline: asset upload failed for $tag"; return 1
+      fi
     fi
   done
   echo "$tag" > "$STATE/last_tag"

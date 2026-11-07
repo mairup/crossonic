@@ -15,7 +15,6 @@ import 'package:crossonic/ui/common/dialogs/confirmation.dart';
 import 'package:crossonic/ui/settings/settings_viewmodel.dart';
 import 'package:crossonic/utils/exit.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_system_integration/flutter_system_integration.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -101,15 +100,9 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           if (!systemIntegrationConfig.versionCheckExternallyDisabled)
             ListTile(
-              title: const Text("Version Checking"),
+              title: const Text("Updates"),
               trailing: const Icon(Icons.arrow_forward_ios),
-              onTap: () => context.router.push(const VersionCheckingRoute()),
-            ),
-          if (AppImageRepository.isAppImage)
-            ListTile(
-              title: const Text("AppImage Integration"),
-              trailing: const Icon(Icons.arrow_forward_ios),
-              onTap: () => context.router.push(const AppImageRoute()),
+              onTap: () => context.router.push(UpdatesRoute()),
             ),
           ListTile(
             title: const Text("About"),
@@ -144,6 +137,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     "It's free software under the MPL-2.0 license.",
                   ),
                   const SizedBox(height: 12),
+                  const Text(
+                    "This build is the Crossonic fork maintained by Mai.",
+                  ),
+                  const SizedBox(height: 12),
                   MouseRegion(
                     cursor: SystemMouseCursors.click,
                     child: GestureDetector(
@@ -160,6 +157,16 @@ class _SettingsPageState extends State<SettingsPage> {
                         Uri.parse("https://github.com/juho05/crossonic"),
                       ),
                       child: Text("Source Code", style: linkStyle),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri.parse("https://git.mairup.space/mai/crossonic"),
+                      ),
+                      child: Text("Fork Source Code", style: linkStyle),
                     ),
                   ),
                   const SizedBox(height: 8),

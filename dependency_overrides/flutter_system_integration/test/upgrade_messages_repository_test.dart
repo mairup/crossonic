@@ -296,7 +296,7 @@ void main() {
         final request = requests.single;
         expect(
           request.url.toString(),
-          "https://api.github.com/repos/owner/repo/contents/assets/"
+          "https://git.mairup.space/api/v1/repos/owner/repo/contents/assets/"
           "upgrade_messages.json?ref=v2.0.0",
         );
         expect(request.headers["Accept"], "application/vnd.github.raw+json");
@@ -329,7 +329,7 @@ void main() {
       await build(config: config).fetchMessagesForUpdate("v2.0.0");
       expect(
         requests.single.url.path,
-        "/repos/owner/repo/contents/app/assets/upgrade%20messages.json",
+        "/api/v1/repos/owner/repo/contents/app/assets/upgrade%20messages.json",
       );
     });
 

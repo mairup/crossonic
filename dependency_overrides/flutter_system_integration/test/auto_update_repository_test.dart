@@ -201,7 +201,7 @@ void main() {
 
       expect(
         downloads.single.url.toString(),
-        "https://github.com/owner/repo/releases/download/v2.0.0/"
+        "https://git.mairup.space/owner/repo/releases/download/v2.0.0/"
         "Test-2.0.0.bin",
       );
       verify(() => updater.generateDownloadFileNames(Version.parse("v2.0.0")));
